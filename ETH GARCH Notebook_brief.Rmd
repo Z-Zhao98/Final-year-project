@@ -1,0 +1,113 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+setwd("/Users/zhaozhun/Dropbox/Zhao Zhun-FYP/code/SVCJ-master")
+rm(list=ls())
+library(TSA)
+library(forecast)
+library(tseries)
+library(ggplot2)
+library(fGarch)
+library(rugarch)
+
+train_startDate = as.Date("2017-11-09")
+train_endDate = as.Date("2021-11-09")
+
+test_startDate = as.Date("2021-11-10")
+test_endDate = as.Date("2021-11-10")
+
+train_dates <- seq(train_startDate, train_endDate, "days")
+test_dates <- seq(test_startDate, test_endDate, "days")
+
+full_startDate = as.Date("2017-11-09")
+full_endDate = as.Date("2021-11-30")
+```
+
+```{r}
+full_dates <- seq(full_startDate, full_endDate, "days")
+
+```
+```{r}
+ccP.df <- read.csv(file = 'ETH-USD.csv',stringsAsFactors = FALSE)
+
+training.df <- ccP.df[1:1462,]
+test.df <- ccP.df[1463:1483,]
+full.df <- ccP.df[1:1483,]
+
+train_ccP.ts <- ts(data = as.numeric(training.df$Adj.Close),frequency = 365, start = c(2017,as.numeric(format(train_dates[1], "%j"))))
+test_ccP.ts <- ts(data = as.numeric(test.df$Adj.Close),frequency = 365, start = c(2021,as.numeric(format(test_dates[1], "%j"))))
+full_ccP.ts <-ts(data = as.numeric(full.df$Adj.Close),frequency = 365, start = c(2017,as.numeric(format(full_dates[1], "%j"))))
+```
+
+```{r}
+par(mfrow=c(3,1))
+##plot the time series of Price
+plot(full_ccP.ts,ylab='BTC price')
+
+## log price
+plot(log(full_ccP.ts),ylab='BTC log price')
+
+##log return 
+full.logR <- diff(log(full_ccP.ts))
+
+plot(full.logR,ylab='BTC log return')
+summary(full.logR)
+```
+
+```{r}
+kurtosis(full.logR)
+skewness(full.logR)
+sd(full.logR)
+jarque.bera.test(full.logR)
+shapiro.test(full.logR)
+```
+
+
+```{r}
+logP <- log(train_ccP.ts)
+logR <- diff(logP)
+```
+
+```{r}
+Box.test(logR, type = "Ljung-Box", lag=15)
+```
+
+```{r}
+arimaiGarcht_spec <- ugarchspec(variance.model = list(
+      model = "iGARCH", garchOrder = c(1, 1)), 
+    mean.model = list(
+      armaOrder = c(2,10), #set arma order for `p` and `q`.
+      include.mean = TRUE), 
+     #set fixed.pars for `d` value
+    distribution.model = "std")
+
+arimaiGarchtfit = ugarchfit(arimaiGarcht_spec, logR, solver = 'hybrid')
+show(arimaiGarchtfit)
+```
+```{r}
+mean((arimaiGarchtfit@fit$residuals)^2)
+```
+```{r}
+qqnorm(y = (residuals(arimaiGarchtfit,standardize = TRUE)), xlim = c(-4, 4), ylim = c(-4, 4), col = "blue", cex = 0.8,ylab="", xlab = "")
+  abline(a = 0, b = 1, col = "red", lwd = 2)
+  title(ylab = "Quantiles of Input Sample", line=2)
+  title(xlab = "Standard Normal Quantiles", line=2)
+```
+
+```{r}
+shapiro.test(as.vector(residuals(arimaiGarchtfit,standardize = TRUE)))
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

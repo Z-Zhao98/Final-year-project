@@ -1,0 +1,607 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+**Library**
+```{r warning=FALSE}
+setwd("/Users/zhaozhun/Dropbox/Zhao Zhun-FYP/code/SVCJ-master")
+rm(list=ls())
+library(TSA)
+library(forecast)
+library(tseries)
+library(ggplot2)
+library(fGarch)
+library(rugarch)
+
+train_startDate = as.Date("2017-11-09")
+train_endDate = as.Date("2021-11-09")
+
+test_startDate = as.Date("2021-11-10")
+test_endDate = as.Date("2021-11-30")
+
+train_dates <- seq(train_startDate, train_endDate, "days")
+test_dates <- seq(test_startDate, test_endDate, "days")
+full_dates <- seq(train_startDate, test_endDate, "days")
+
+##draw hist quote from yahoo finance; 
+##require zoo lib 
+
+```
+**import data**
+```{r}
+##load from existing file
+
+ccP.df <- read.csv(file = 'BTC-USD.csv',stringsAsFactors = FALSE)
+
+training.df <- ccP.df[1:1462,]
+test.df <- ccP.df[1463:1483,]
+full.df <- ccP.df[1:1483,]
+
+train_ccP.ts <- ts(data = as.numeric(training.df$Adj.Close),frequency = 365, start = c(2017,as.numeric(format(train_dates[1], "%j"))))
+test_ccP.ts <- ts(data = as.numeric(test.df$Adj.Close),frequency = 365, start = c(2021,as.numeric(format(test_dates[1], "%j"))))
+full_ccP.ts <-ts(data = as.numeric(full.df$Adj.Close),frequency = 365, start = c(2017,as.numeric(format(full_dates[1], "%j"))))
+```
+**data cleaning** 
+```{r}
+#data cleaning 
+paste("before cleaning - ",sum(is.na(train_ccP.ts)))
+train_ccP.ts <- na.remove(train_ccP.ts)
+paste("after cleaning -", sum(is.na(train_ccP.ts)))
+
+paste("before cleaning - ",sum(is.na(test_ccP.ts)))
+test_ccP.ts <- na.remove(test_ccP.ts)
+paste("after cleaning -", sum(is.na(test_ccP.ts)))
+
+paste("before cleaning - ",sum(is.na(full_ccP.ts)))
+full_ccP.ts <- na.remove(full_ccP.ts)
+paste("after cleaning -", sum(is.na(full_ccP.ts)))
+```
+**EDA**
+```{r}
+logP <- log(train_ccP.ts)
+logR <- diff(logP)
+
+
+par(mfrow=c(3,1))
+##plot the time series of Price
+plot(full_ccP.ts,ylab='BTC price')
+
+## log price
+plot(log(full_ccP.ts),ylab='BTC log price')
+
+##log return 
+full.logR <- diff(log(full_ccP.ts))
+
+plot(full.logR,ylab='BTC log return')
+summary(full.logR)
+
+
+```
+```{r}
+kurtosis(full.logR)
+skewness(full.logR)
+sd(full.logR)
+jarque.bera.test(full.logR)
+shapiro.test(full.logR)
+
+```
+
+**Stationrity**
+```{r}
+#test for stationarity of the log-return series 
+adf.test(logR)
+```
+=> logR series is stationary
+**ACF PACF on logR**
+```{r}
+## acf pacf
+par(mfrow=c(1,2))
+acf(logR[1:length(logR)],main="")
+pacf(logR[1:length(logR)],main="")
+```
+```{r}
+Box.test(logR, type = "Ljung-Box", lag=15)
+```
+
+
+**ARIMA** 
+```{r}
+# fit.autoarima <- auto.arima(logR,trace = TRUE,
+#                             max.p = 10,
+#                             max.q = 10,
+#                             max.order = 21,
+#                             max.d = 1,
+#                             start.p = 0,
+#                             start.q = 0,
+#                             seasonal = FALSE,
+#                             parallel = TRUE,
+#                             num.cores = NULL,
+#                             ic = "aic")
+
+# fit.autoarima <- auto.arima(logR,trace = TRUE,
+#                           max.p = 10,
+#                           max.q = 10,
+#                           max.order = 31,
+#                           max.d = 0,
+#                           start.p = 0,
+#                           start.q = 0,
+#                           seasonal = FALSE,
+#                           parallel = TRUE,
+#                           num.cores = NULL,
+#                           ic = "aic",approximation=FALSE,stepwise=FALSE,stationary = TRUE,allowmean = TRUE)
+
+fit.autoarima <- arima(logR, order=c(7,0,10),method="ML", optim.control=list(maxit = 1000))
+summary(fit.autoarima)
+print("-----------------")
+pvalue.arima <- 2*(1-pt(abs(fit.autoarima$coef)/sqrt(diag(fit.autoarima$var.coef)),df = length(logR)-length(fit.autoarima$coef)))
+print(pvalue.arima)
+```
+*quick search* gives (0,0,0)
+*grid searcH* guves (7,0,10)
+
+```{r}
+checkresiduals(fit.autoarima)
+```
+
+try other arima oder: 
+```{r}
+eacf(logR, ar.max=10,ma.max = 10)
+```
+
+```{r}
+testfit1000 <- arima(logR,order= c(10,0,0), method = "ML")
+summary(testfit1000)
+print("-----------------")
+pvalue.testarima <- 2*(1-pt(abs(testfit1000$coef)/sqrt(diag(testfit1000$var.coef)),df = length(logR)-length(testfit1000$coef)))
+print(pvalue.testarima)
+```
+```{r}
+pacf(testfit1000$residuals)
+acf(testfit1000$residuals)
+```
+
+```{r}
+testfit000 <- arima(logR,order= c(0,0,0))
+summary(testfit000)
+print("-----------------")
+pvalue.testarima <- 2*(1-pt(abs(testfit000$coef)/sqrt(diag(testfit000$var.coef)),df = length(logR)-length(testfit000$coef)))
+print(pvalue.testarima)
+```
+```{r}
+checkresiduals(testfit000)
+```
+
+=> *arima (7,0,7)* seems to be the fit
+
+
+**ARIMA assumption check**
+
+*normality of residuals*
+```{r}
+qqnorm(fit.autoarima$residuals)
+qqline(fit.autoarima$residuals, asp=1)
+shapiro.test(fit.autoarima$residuals)
+```
+=> not normal => reasonable given the large spikes 
+
+*autocorrelation*
+```{r}
+# checkresiduals(fit.autoarima)
+# print("----------------------------------------------------------")
+# Box.test(fit.autoarima$residuals,lag=12,type = "Ljung-Box",fitdf = 4)
+```
+=>Ljung-Box test suggests *existence of autocorrelation* amoung residuals
+```{r}
+# par(mfrow=c(1,2))
+# acf(rstandard(fit.autoarima),main="")
+# pacf(rstandard(fit.autoarima),main="")
+# Box.test(fit.autoarima$residuals,lag=24,type = "Ljung-Box",fitdf = 14)
+```
+
+
+**testing model** 
+```{r}
+# qqnorm(testfit209$residuals)
+# qqline(testfit209$residuals, asp=1)
+# shapiro.test(testfit209$residuals)
+# print("----------------------------------------------------------")
+# checkresiduals(testfit209,lag = 24)
+# print("----------------------------------------------------------")
+# Box.test(testfit209$residuals,lag=24,type = "Ljung-Box",fitdf = 13)
+```
+
+**GARCH**
+*Plots*
+```{r}
+ggplot(logR, aes(x=logR))+
+  geom_histogram(aes(y=..density..),colour = "black") +
+  stat_function(fun = dnorm, args= list(mean = mean(logR), sd = sd(logR)), colour = "red")  ##red is the data fit into gaussian with mean and sd of the dataset 
+
+##par(mfrow=c(2,2))
+acf(abs(logR),main='ACF of Daily Absolute Log-Return')
+pacf(abs(logR),main='PACF of Daily Absolute Log-Return')
+acf(logR^2,main='ACF of Daily Squared Log-Return')
+pacf(logR^2,main='PACF of Daily Squared Log-Return')
+```
+*ARCH test*
+```{r}
+arimaRes2 = fit.autoarima$residuals^2
+Box.test(arimaRes2, lag = 30, fitdf =17 ,type = "Ljung")
+```
+```{r}
+arimaRes2 = testfit202$residuals^2
+Box.test(arimaRes2, lag = 15, fitdf =4 ,type = "Ljung")
+```
+```{r}
+arimaRes2 = testfit000$residuals^2
+Box.test(arimaRes2, lag = 20, fitdf =0 ,type = "Ljung")
+acf(arimaRes2,lag.max = 50)
+```
+
+
+reject H0 <=> There is ARCH effect
+
+
+
+*GARCH model fitting*
+
+1. ARIMA+GARCH(1,1) with normal
+```{r}
+# fit.arimaGarch_norm <- garchFit(formula=~arma(2,2)+garch(1,1), data=logR,trace=F, cond.dist = "norm")
+# summary(fit.arimaGarch_norm)
+```
+```{r}
+spec.arimaGarch_norm <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,10)),distribution.model = "norm")
+
+fit.arimaGarch_norm <- ugarchfit(spec = spec.arimaGarch_norm,data = logR,solver = "hybrid")
+show(fit.arimaGarch_norm)
+```
+no leverage effect?
+residual:  no autocorr ; no remaining ARCH
+
+```{r}
+pacf(residuals(fit.arimaGarch_norm,standardize = TRUE))
+acf(residuals(fit.arimaGarch_norm,standardize = TRUE))
+
+```
+
+
+2. ARIMA(7,0,7)+GARCH(1,1) with t
+
+```{r}
+# fit.arimaGarch_std <- garchFit(formula=~arma(2,2)+garch(1,1), data=logR,trace=F, cond.dist = "std")
+# summary(fit.arimaGarch_std)
+```
+```{r}
+spec.arimaGarch_std <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(2,3), include.mean=TRUE),distribution.model = "std")
+
+fit.arimaGarch_std <- ugarchfit(spec = spec.arimaGarch_std,data = logR)
+show(fit.arimaGarch_std)
+```
+AIC = -3.3145
+residuals: auto correlation ; no remaining ARCH effect ; no leverage effect
+```{r}
+acf(fit.arimaGarch_std@fit$residuals)
+pacf(fit.arimaGarch_std@fit$residuals)
+```
+
+
+
+
+
+
+
+
+5. ARIMA(7,0,7)+GARCH(1,1) with snorm
+
+```{r}
+# fit.arimaGarch_snorm <- garchFit(formula=~arma(2,2)+garch(1,1), data=logR,trace=F, cond.dist = "snorm")
+# summary(fit.arimaGarch_snorm)
+```
+```{r}
+spec.arimaGarch_snorm <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(2,3)),distribution.model = "snorm")
+
+fit.arimaGarch_snorm <- ugarchfit(spec = spec.arimaGarch_snorm,data = logR)
+show(fit.arimaGarch_snorm)
+```
+
+residual: autocorr ; no remaining ARCH effect ; no leverage effect
+
+6. ARIMA(7,0,7)+GARCH(1,1) with sstd
+
+```{r}
+# fit.arimaGarch_sstd <- garchFit(formula=~arma(2,2)+garch(1,1), data=logR,trace=F, cond.dist = "sstd")
+# summary(fit.arimaGarch_sstd)
+```
+```{r}
+spec.arimaGarch_sstd <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "sstd")
+
+fit.arimaGarch_sstd <- ugarchfit(spec = spec.arimaGarch_sstd,data = logR,solver = "hybrid")
+show(fit.arimaGarch_sstd)
+```
+AIC=-3.3136
+residual: exists autocorr ; no remaining ARCH effect ; no leverage effect
+```{r}
+acf(fit.arimaGarch_sstd@fit$residuals)
+pacf(fit.arimaGarch_sstd@fit$residuals)
+```
+
+7. ARIMA(7,0,7)+GARCH(1,1) with ged
+
+```{r}
+spec.arimaGarch_ged <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "ged")
+
+fit.arimaGarch_ged <- ugarchfit(spec = spec.arimaGarch_ged,data = logR,solver = "hybrid")
+show(fit.arimaGarch_ged)
+```
+
+residual: exists autocorr ; no remaining ARCH effect ; no leverage effect
+
+8. ARIMA(2,0,2)+GARCH(1,1) with sged
+```{r}
+spec.arimaGarch_sged <- ugarchspec(variance.model = list(model="sGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(2,2)),distribution.model = "sged")
+
+fit.arimaGarch_sged <- ugarchfit(spec = spec.arimaGarch_sged,data = logR,solver = "hybrid")
+show(fit.arimaGarch_sged)
+```
+
+residual: exists autocorr ; no remaining ARCH effect ; no leverage effect
+
+```{r}
+acf(fit.arimaGarch_sged@fit$residuals)
+pacf(fit.arimaGarch_sged@fit$residuals)
+```
+
+
+9. ARIMA GJRGARCH with norm
+
+```{r}
+spec.arimaGarch_norm <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "norm")
+
+fit.arimaGarch_norm <- ugarchfit(spec = spec.arimaGarch_norm,data = logR, solver = "hybrid")
+show(fit.arimaGarch_norm)
+```
+
+no auto; no remaining ARCH effec ; no leverage effect 
+
+10. ARMIA gjr GARCH with t
+
+```{r}
+spec.arimagjrGarch_std <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "std")
+
+fit.arimagjrGarch_std <- ugarchfit(spec = spec.arimagjrGarch_std,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_std)
+```
+
+serial correlation ; no remaining ARCH ; no leverage effect
+
+11. arima gjr GARCH with ged
+```{r}
+spec.arimagjrGarch_ged <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "ged")
+
+fit.arimagjrGarch_ged <- ugarchfit(spec = spec.arimagjrGarch_ged,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_ged)
+```
+
+serial correlation ; no remaining ARCH effect ; no leverage effect
+
+12. arima gjr GARCH with snorm
+```{r}
+spec.arimagjrGarch_snorm <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "snorm")
+
+fit.arimagjrGarch_snorm <- ugarchfit(spec = spec.arimagjrGarch_snorm,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_snorm)
+```
+
+auto correlation ; no remaining ARCH effect ; no leverage effect 
+
+```{r}
+spec.arimagjrGarch_snorm1 <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),distribution.model = "snorm")
+
+fit.arimagjrGarch_snorm1 <- ugarchfit(spec = spec.arimagjrGarch_snorm1,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_snorm1)
+```
+
+
+13. arima gjr garch with sstd
+```{r}
+spec.arimagjrGarch_sstd <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "sstd")
+
+fit.arimagjrGarch_sstd <- ugarchfit(spec = spec.arimagjrGarch_sstd,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_sstd)
+```
+
+
+
+
+14, arima gjr garch with sged
+
+```{r}
+spec.arimagjrGarch_sged <- ugarchspec(variance.model = list(model="gjrGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "sged")
+
+fit.arimagjrGarch_sged <- ugarchfit(spec = spec.arimagjrGarch_sged,data = logR, solver = "hybrid")
+show(fit.arimagjrGarch_sged)
+```
+
+
+15. arima i garch with norm 
+```{r}
+spec.arimaiGarch_norm <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "norm")
+
+fit.arimaiGarch_norm <- ugarchfit(spec = spec.arimaiGarch_norm,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_norm)
+```
+
+
+16. arima i garch with t
+
+```{r}
+spec.arimaiGarch_std <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "std")
+
+fit.arimaiGarch_std <- ugarchfit(spec = spec.arimaiGarch_std,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_std)
+```
+
+17. arima i garch with ged
+```{r}
+spec.arimaiGarch_ged <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "ged")
+
+fit.arimaiGarch_ged <- ugarchfit(spec = spec.arimaiGarch_ged,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_ged)
+```
+
+
+18. arima i garch with snorm
+```{r}
+spec.arimaiGarch_snorm <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "snorm")
+
+fit.arimaiGarch_snorm <- ugarchfit(spec = spec.arimaiGarch_snorm,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_snorm)
+```
+
+
+19. arima i garch with st
+```{r}
+spec.arimaiGarch_sstd <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "sstd")
+
+fit.arimaiGarch_sstd <- ugarchfit(spec = spec.arimaiGarch_sstd,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_sstd)
+```
+
+
+20. arima i garch with sged
+
+```{r}
+spec.arimaiGarch_sged <- ugarchspec(variance.model = list(model="iGARCH",garchOrder=c(1,1)),mean.model=list(armaOrder=c(7,7)),distribution.model = "sged")
+
+fit.arimaiGarch_sged <- ugarchfit(spec = spec.arimaiGarch_sged,data = logR, solver = "hybrid")
+show(fit.arimaiGarch_sged)
+```
+
+
+
+```{r}
+
+printGarchResult<- function(logR, model_set, arma,distribution_set) {
+
+iteration = 0
+for (i in 1:length(model_set)){
+  for (j in 1:length(distribution_set)){
+
+  spec = ugarchspec(
+    variance.model = list(
+      model = model_set[i], garchOrder = c(1, 1)), 
+    mean.model = list(
+      armaOrder = arma, #set arma order for `p` and `q`.
+      include.mean = TRUE), 
+     #set fixed.pars for `d` value
+    distribution.model = distribution_set[j])
+  
+  fit = ugarchfit(spec, logR, solver = 'hybrid')
+  show(fit)
+  par(mfrow=c(1,2))
+  acf(residuals(fit,standardize = TRUE))
+  acf(residuals(fit,standardize = TRUE)^2)
+}
+}
+
+  }
+```
+```{r}
+arma_order <- c(7,10)
+model_set <-c("sGARCH","gjrGARCH","iGARCH")
+distribution_set <-c("norm","std","ged","snorm","sstd","sged")
+printGarchResult(logR, model_set,arma =arma_order,distribution_set)
+```
+```{r}
+arma_order <- c(0,0)
+model_set <-c("sGARCH","gjrGARCH","iGARCH")
+distribution_set <-c("norm","std","ged","snorm","sstd","sged")
+printGarchResult(logR, model_set,arma = arma_order,distribution_set)
+```
+
+```{r}
+iGarcht_spec <- ugarchspec(variance.model = list(
+      model = "iGARCH", garchOrder = c(1, 1)), 
+    mean.model = list(
+      armaOrder = c(0,0), #set arma order for `p` and `q`.
+      include.mean = TRUE), 
+     #set fixed.pars for `d` value
+    distribution.model = "std")
+
+iGarchtfit = ugarchfit(iGarcht_spec, logR, solver = 'hybrid')
+show(iGarchtfit)
+
+```
+```{r}
+#Box.test(residuals(iGarchtfit,standardize = TRUE),lag = 10, fitdf = 0,type = "Ljung-Box")
+list <- c(0, nrow=30)
+par(mfrow=c(1,2))
+for (i in 1:30){
+  list[i] <- Box.test(residuals(iGarchtfit,standardize = TRUE),lag = i, fitdf = 0,type = "Ljung-Box")$p.value
+}
+plot(list,xlab="Lag",ylab="p value",main="L-B test on standardised res")
+abline(h=0.05,col="red",lty="dashed")
+rm(list)
+
+list <- c(0, nrow=30)
+for (i in 1:30){
+  list[i] <- Box.test(residuals(iGarchtfit,standardize = TRUE)^2,lag = i, fitdf = 0,type = "Ljung-Box")$p.value
+}
+plot(list,xlab="Lag",ylab="p value",main="L-B test on standardised sqrd res")
+abline(h=0.05,col="red",lty="dashed")
+rm(list)
+```
+
+```{r}
+arimaiGarchged_spec <- ugarchspec(variance.model = list(
+      model = "iGARCH", garchOrder = c(1, 1)), 
+    mean.model = list(
+      armaOrder = c(7,10), #set arma order for `p` and `q`.
+      include.mean = TRUE), 
+     #set fixed.pars for `d` value
+    distribution.model = "ged")
+
+arimaiGarchgedfit = ugarchfit(arimaiGarchged_spec, logR, solver = 'hybrid')
+show(arimaiGarchgedfit)
+```
+```{r}
+Box.test(residuals(arimaiGarchgedfit,standardize = TRUE),lag = 50, fitdf = 17,type = "Ljung-Box")
+list <- c(0, nrow=50)
+for (i in 1:50){
+  list[i] <- Box.test(residuals(iGarchtfit,standardize = TRUE),lag = i, fitdf = 17,type = "Ljung-Box")$p.value
+}
+plot(list)
+abline(h=c(0.05,0.1),col=c("red","blue"))
+
+rm(list)
+```
+```{r}
+mean((iGarchtfit@fit$residuals)^2)
+```
+```{r}
+qqnorm(y = (residuals(iGarchtfit,standardize = TRUE)), xlim = c(-4, 4), ylim = c(-4, 4), col = "blue", cex = 0.8,ylab="", xlab = "")
+  abline(a = 0, b = 1, col = "red", lwd = 2)
+  title(ylab = "Quantiles of Input Sample", line=2)
+  title(xlab = "Standard Normal Quantiles", line=2)
+```
+
+```{r}
+shapiro.test(iGarchtfit@fit$residuals)
+```
+```{r}
+shapiro.test(as.vector(residuals(iGarchtfit,standardize = TRUE)))
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
